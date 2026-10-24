@@ -9,6 +9,7 @@ v2.1.0
   (raw 254/253) handled, comfort/eco temperature metrics, error code, fixed crash when the
   summeractive field is missing
 * door/window contacts (Smart Control 350): contact state
+* optional upper/lower temperature levels for non-thermostat devices (switches, buttons, repeaters)
 * battery handling for non-thermostat devices cleaned up (metric "battery")
 * metric names "WindowOpen"/"batteryLevel" renamed to "window_open"/"battery"
 * removed the "show HANFUNUnit entries" option (never had an effect, units are not discovered)

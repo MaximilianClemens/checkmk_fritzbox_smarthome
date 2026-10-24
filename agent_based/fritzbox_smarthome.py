@@ -9,6 +9,7 @@ from cmk.agent_based.v2 import (
     Result,
     Service,
     State,
+    check_levels,
 )
 
 # Raw hkr temperature values with a special meaning (unit: 0.5 °C)
@@ -245,9 +246,15 @@ def check_fritzbox_smarthome(item, params, section):
     if "temperature" in data and not is_hkr:
         celsius = data["temperature"].get("celsius")
         if celsius is not None:
-            te = float(celsius) / 10.0
-            yield Metric("temperature", te)
-            yield Result(state=State.OK, summary=f"Temperature: {te}°C")
+            temp_params = params.get("temperature", {})
+            yield from check_levels(
+                float(celsius) / 10.0,
+                levels_upper=temp_params.get("levels_upper"),
+                levels_lower=temp_params.get("levels_lower"),
+                metric_name="temperature",
+                label="Temperature",
+                render_func=lambda v: f"{v:.1f}°C",
+            )
 
     # --- battery of non-thermostat devices (thermostats are handled above) ---
     if not is_hkr:
