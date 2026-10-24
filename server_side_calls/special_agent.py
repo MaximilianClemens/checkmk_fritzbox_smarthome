@@ -9,6 +9,8 @@ def _agent_arguments(params, host_config):
         "--password", params.get("password").unsafe(),
         "--port", str(params.get("port", 80)),
         "--protocol", params.get("protocol", "http"),
+        # key missing in rules from versions < 2.1.0 -> auto
+        "--login-method", params.get("login_method", "auto"),
     ]
 
     if params.get("ignore_ssl", False):

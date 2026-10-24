@@ -62,6 +62,26 @@ def _formspec():
                     prefill=DefaultValue(False),
                 ),
             ),
+            # optional: rules created with older versions do not have this key
+            # and behave like "auto"
+            "login_method": DictElement(
+                required=False,
+                parameter_form=SingleChoice(
+                    title=Title("Login method"),
+                    help_text=Help(
+                        "How to answer the login challenge of the Fritz!Box. "
+                        "Automatic uses PBKDF2 when the box offers it (Fritz!OS 7.24 and newer) "
+                        "and falls back to MD5 otherwise. Choose a fixed method only if the "
+                        "automatic detection does not work for your box."
+                    ),
+                    elements=[
+                        SingleChoiceElement("auto", Title("Automatic (PBKDF2 if available, otherwise MD5)")),
+                        SingleChoiceElement("pbkdf2", Title("PBKDF2 (Fritz!OS 7.24 and newer)")),
+                        SingleChoiceElement("md5", Title("MD5 (legacy, Fritz!OS before 7.24)")),
+                    ],
+                    prefill=DefaultValue("auto"),
+                ),
+            ),
         },
     )
 

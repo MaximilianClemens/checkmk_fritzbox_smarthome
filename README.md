@@ -51,6 +51,10 @@ Install the MKP from the releases page via *Setup → Extension packages* or `mk
 Thresholds (temperature deviation, battery, humidity) and the handling of offline devices are
 configured in the rule *Settings for Fritz!Box Smarthome Devices* (*Service monitoring rules*).
 
+The *Login method* in the agent rule defaults to *Automatic*: PBKDF2 when the box offers it
+(FRITZ!OS 7.24 and newer), MD5 otherwise. Set it to a fixed method only if the automatic detection
+fails for your box. Rules created with version 2.0.x do not need to be touched.
+
 ## Notes
 
 * HAN-FUN units (sub units of a HAN-FUN device) are not discovered, they carry no own data.

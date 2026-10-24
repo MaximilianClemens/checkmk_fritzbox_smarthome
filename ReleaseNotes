@@ -1,7 +1,9 @@
 # Release Notes for fritzbox_smarthome
 
 v2.1.0
-* login via PBKDF2 challenge-response (Fritz!OS >= 7.24), MD5 fallback for older boxes
+* login via PBKDF2 challenge-response (Fritz!OS >= 7.24), MD5 fallback for older boxes;
+  the method is selectable in the agent rule (automatic/PBKDF2/MD5), existing rules keep
+  working and use "automatic"
 * agent reports errors on stderr with a non-zero exit code instead of writing them into the section
 * thermostats: no duplicate temperature/battery output anymore, target temperature "on"/"off"
   (raw 254/253) handled, comfort/eco temperature metrics, error code, fixed crash when the

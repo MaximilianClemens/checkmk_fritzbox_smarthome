@@ -28,6 +28,12 @@ def parse_args():
     parser.add_argument("--port", type=int, default=80)
     parser.add_argument("--protocol", choices=["http", "https"], default="http")
     parser.add_argument("--ignore-ssl", action="store_true", default=False)
+    parser.add_argument(
+        "--login-method",
+        choices=["auto", "pbkdf2", "md5"],
+        default="auto",
+        help="auto: PBKDF2 if offered by the box, otherwise MD5 (default)",
+    )
     parser.add_argument("--debug", action="store_true", default=False)
     return parser.parse_args()
 
@@ -67,10 +73,13 @@ def _parse_login_xml(content):
     return xml
 
 
-def login(base_url, username, password, verify_ssl, debug):
+def login(base_url, username, password, verify_ssl, debug, login_method="auto"):
     # version=2 asks the box for a PBKDF2 challenge; older boxes ignore it
-    # and still return an MD5 challenge.
-    sid_url = f"{base_url}/login_sid.lua?version=2"
+    # and still return an MD5 challenge. Without version=2 every box returns
+    # an MD5 challenge.
+    sid_url = f"{base_url}/login_sid.lua"
+    if login_method != "md5":
+        sid_url += "?version=2"
     r = requests.get(sid_url, verify=verify_ssl, timeout=LOGIN_TIMEOUT)
     r.raise_for_status()
     xml = _parse_login_xml(r.content)
@@ -87,14 +96,26 @@ def login(base_url, username, password, verify_ssl, debug):
     if not challenge:
         raise Exception(f"No login challenge received, got: {r.content[:200]!r}")
 
-    if challenge.startswith("2$"):
+    is_pbkdf2 = challenge.startswith("2$")
+    if login_method == "pbkdf2" and not is_pbkdf2:
+        raise Exception(
+            "Login method PBKDF2 requested but the box only offers an MD5 challenge "
+            "(Fritz!OS older than 7.24?). Use login method 'auto' or 'md5'."
+        )
+    if login_method == "md5" and is_pbkdf2:
+        raise Exception(
+            "Login method MD5 requested but the box returned a PBKDF2 challenge. "
+            "Use login method 'auto' or 'pbkdf2'."
+        )
+
+    if is_pbkdf2:
         response = calculate_pbkdf2_response(challenge, password)
         method = "PBKDF2"
     else:
         response = calculate_md5_response(challenge, password)
         method = "MD5"
     if debug:
-        sys.stderr.write(f"Login challenge type: {method}\n")
+        sys.stderr.write(f"Login challenge type: {method} (requested: {login_method})\n")
 
     r = requests.post(
         sid_url,
@@ -176,7 +197,7 @@ def main():
     base_url = f"{args.protocol}://{args.host}:{args.port}"
 
     try:
-        sid = login(base_url, args.username, args.password, verify_ssl, args.debug)
+        sid = login(base_url, args.username, args.password, verify_ssl, args.debug, args.login_method)
     except Exception as e:
         sys.stderr.write(f"Login to {base_url} failed: {e}\n")
         return 1
