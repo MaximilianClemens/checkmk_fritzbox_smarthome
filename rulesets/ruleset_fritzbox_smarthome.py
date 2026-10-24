@@ -1,21 +1,27 @@
 #!/usr/bin/env python3
 # -*- encoding: utf-8 -*-
 
-from cmk.rulesets.v1 import Title
+from cmk.rulesets.v1 import Help, Title
 from cmk.rulesets.v1.form_specs import (
-    Dictionary, DictElement,
-    Float
+    BooleanChoice,
+    DefaultValue,
+    DictElement,
+    Dictionary,
+    Float,
+    LevelDirection,
+    SimpleLevels,
+    SingleChoice,
+    SingleChoiceElement,
 )
 from cmk.rulesets.v1.rule_specs import CheckParameters, HostAndItemCondition, Topic
-from cmk.rulesets.v1 import Title
-from cmk.rulesets.v1.form_specs import SingleChoice, SingleChoiceElement, DefaultValue
-from cmk.rulesets.v1.form_specs import BooleanChoice, DefaultValue
 
 
 
 def _parameter_form():
     return Dictionary(
         title      = Title("Settings for Fritz!Box Smarthome Devices"),
+        # option from 2.0.x that never had an effect, keep stored rules loadable
+        ignored_elements = ("showHFunit",),
         elements   = {
             # Offline-Devices
             'present': DictElement(
@@ -27,15 +33,6 @@ def _parameter_form():
                         SingleChoiceElement("crit", Title("show as CRIT")),
                     ],
                     prefill=DefaultValue("warn"),
-                ),
-                required=True,
-            ),
-
-            # show HANFUNUnit (default: off)
-            'showHFunit': DictElement(
-                parameter_form=BooleanChoice(
-                    title=Title("show HANFUNUnit entries"),
-                    prefill=DefaultValue(False),
                 ),
                 required=True,
             ),
@@ -198,6 +195,39 @@ def _parameter_form():
                     }
                 ),
                 required = True,
+            ),
+
+            # Temperature of non-thermostat devices (switches, buttons, repeaters).
+            # Optional, rules from older versions do not have it -> no levels.
+            'temperature': DictElement(
+                parameter_form = Dictionary(
+                    title    = Title("Temperature (non-thermostat devices)"),
+                    help_text = Help(
+                        "Levels for the temperature sensor of switches, buttons and repeaters. "
+                        "Thermostats are checked via the deviation from the target temperature."
+                    ),
+                    elements = {
+                        'levels_upper': DictElement(
+                            parameter_form = SimpleLevels(
+                                title = Title("Upper levels"),
+                                form_spec_template = Float(unit_symbol="°C"),
+                                level_direction = LevelDirection.UPPER,
+                                prefill_fixed_levels = DefaultValue((30.0, 35.0)),
+                            ),
+                            required = False,
+                        ),
+                        'levels_lower': DictElement(
+                            parameter_form = SimpleLevels(
+                                title = Title("Lower levels"),
+                                form_spec_template = Float(unit_symbol="°C"),
+                                level_direction = LevelDirection.LOWER,
+                                prefill_fixed_levels = DefaultValue((10.0, 5.0)),
+                            ),
+                            required = False,
+                        ),
+                    }
+                ),
+                required = False,
             ),
         }
     )
