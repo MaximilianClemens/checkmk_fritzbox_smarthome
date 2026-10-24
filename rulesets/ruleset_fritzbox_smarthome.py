@@ -3,19 +3,23 @@
 
 from cmk.rulesets.v1 import Title
 from cmk.rulesets.v1.form_specs import (
-    Dictionary, DictElement,
-    Float
+    BooleanChoice,
+    DefaultValue,
+    DictElement,
+    Dictionary,
+    Float,
+    SingleChoice,
+    SingleChoiceElement,
 )
 from cmk.rulesets.v1.rule_specs import CheckParameters, HostAndItemCondition, Topic
-from cmk.rulesets.v1 import Title
-from cmk.rulesets.v1.form_specs import SingleChoice, SingleChoiceElement, DefaultValue
-from cmk.rulesets.v1.form_specs import BooleanChoice, DefaultValue
 
 
 
 def _parameter_form():
     return Dictionary(
         title      = Title("Settings for Fritz!Box Smarthome Devices"),
+        # option from 2.0.x that never had an effect, keep stored rules loadable
+        ignored_elements = ("showHFunit",),
         elements   = {
             # Offline-Devices
             'present': DictElement(
@@ -27,15 +31,6 @@ def _parameter_form():
                         SingleChoiceElement("crit", Title("show as CRIT")),
                     ],
                     prefill=DefaultValue("warn"),
-                ),
-                required=True,
-            ),
-
-            # show HANFUNUnit (default: off)
-            'showHFunit': DictElement(
-                parameter_form=BooleanChoice(
-                    title=Title("show HANFUNUnit entries"),
-                    prefill=DefaultValue(False),
                 ),
                 required=True,
             ),

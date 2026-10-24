@@ -1,4 +1,20 @@
 # Release Notes for fritzbox_smarthome
+
+v2.1.0
+* login via PBKDF2 challenge-response (Fritz!OS >= 7.24), MD5 fallback for older boxes
+* agent reports errors on stderr with a non-zero exit code instead of writing them into the section
+* thermostats: no duplicate temperature/battery output anymore, target temperature "on"/"off"
+  (raw 254/253) handled, comfort/eco temperature metrics, error code, fixed crash when the
+  summeractive field is missing
+* door/window contacts (Smart Control 350): contact state
+* battery handling for non-thermostat devices cleaned up (metric "battery")
+* metric names "WindowOpen"/"batteryLevel" renamed to "window_open"/"battery"
+* removed the "show HANFUNUnit entries" option (never had an effect, units are not discovered)
+* default for offline devices is WARN as documented
+* README with setup instructions, defaults for port/protocol consistent (80/http)
+* fixed whitespace being stripped from device and product names ("Thermostat Buero" became
+  "ThermostatBuero"); service names change accordingly, run a service discovery after the update
+
 v2.0.2
 * fixed handling of login problems
 
@@ -9,13 +25,3 @@ v2.0.1
 v2.0.0
 * initial release, rewrite of a version for CMK 1.6
 * suppress HANFUNunit devices (they bring no information)
-
-# known issues
-v2.0.1
-* the option to allow the display of HANFUNunit devices does not work for discovery
-  effectivly it's implemented incompletely
-* temperatur is shown twice for thermostat devices (comes so from raw api data)
-* for thermostat devices there are two mechanisms of battery warning implemented:
-  the orignal batterylow warning as given from the Fritz!Box and
-  a configurable threshold check
-* so possibly more options should become hideable by configuration

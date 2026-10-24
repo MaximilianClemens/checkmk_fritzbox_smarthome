@@ -1,2 +1,3 @@
 *.pyc
+*.mkp
 .docs/output*

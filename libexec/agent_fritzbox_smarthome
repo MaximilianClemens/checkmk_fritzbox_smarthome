@@ -1,14 +1,23 @@
 #!/usr/bin/env python3
+"""Special agent for Fritz!Box smarthome devices.
+
+Logs in to the Fritz!Box via login_sid.lua (PBKDF2 challenge-response,
+MD5 fallback for old Fritz!OS versions) and dumps the AHA device list
+as JSON into the <<<fritzbox_smarthome:json>>> section.
+"""
 
 import argparse
-import json
 import hashlib
-import xml.etree.ElementTree as ET
-import requests
+import json
 import sys
+import xml.etree.ElementTree as ET
+
+import requests
 import urllib3
 
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+INVALID_SID = "0000000000000000"
+LOGIN_TIMEOUT = 15
+DATA_TIMEOUT = 60
 
 
 def parse_args():
@@ -16,48 +25,106 @@ def parse_args():
     parser.add_argument("--host", required=True)
     parser.add_argument("--username", required=True)
     parser.add_argument("--password", required=True)
-    parser.add_argument("--port", type=int, default=443)
-    parser.add_argument("--protocol", choices=["http", "https"], default="https")
+    parser.add_argument("--port", type=int, default=80)
+    parser.add_argument("--protocol", choices=["http", "https"], default="http")
     parser.add_argument("--ignore-ssl", action="store_true", default=False)
     parser.add_argument("--debug", action="store_true", default=False)
     return parser.parse_args()
 
 
-def login(base_url, username, password, verify_ssl, debug):
-    sid_url = f"{base_url}/login_sid.lua"
-    r = requests.get(sid_url, verify=verify_ssl)
+def calculate_pbkdf2_response(challenge, password):
+    """Response for a PBKDF2 challenge ("2$<iter1>$<salt1>$<iter2>$<salt2>").
+
+    See AVM Technical Note "Session-ID" (Fritz!OS >= 7.24).
+    """
+    parts = challenge.split("$")
+    if len(parts) != 5:
+        raise ValueError(f"Malformed PBKDF2 challenge: {challenge!r}")
+    iter1 = int(parts[1])
+    salt1 = bytes.fromhex(parts[2])
+    iter2 = int(parts[3])
+    salt2 = bytes.fromhex(parts[4])
+    hash1 = hashlib.pbkdf2_hmac("sha256", password.encode(), salt1, iter1)
+    hash2 = hashlib.pbkdf2_hmac("sha256", hash1, salt2, iter2)
+    return f"{parts[4]}${hash2.hex()}"
+
+
+def calculate_md5_response(challenge, password):
+    """Legacy MD5 response for Fritz!OS < 7.24.
+
+    AVM requires UTF-16LE and replaces code points > 255 with ".".
+    """
+    password = "".join(c if ord(c) < 256 else "." for c in password)
+    md5 = hashlib.md5(f"{challenge}-{password}".encode("utf-16le")).hexdigest()
+    return f"{challenge}-{md5}"
+
+
+def _parse_login_xml(content):
     try:
-        xml = ET.fromstring(r.content)
+        xml = ET.fromstring(content)
+    except ET.ParseError:
+        raise Exception(f"Did not receive XML from login_sid.lua, got: {content[:200]!r}")
+    return xml
 
-        challenge = xml.find("Challenge").text
-        blocktime = int(xml.find("BlockTime").text)
-    except ET.ParseError as e:
-        raise Exception(f"did not receive XML as expected. Got {r.content} instead")
 
-    if blocktime is not None and blocktime > 0:
+def login(base_url, username, password, verify_ssl, debug):
+    # version=2 asks the box for a PBKDF2 challenge; older boxes ignore it
+    # and still return an MD5 challenge.
+    sid_url = f"{base_url}/login_sid.lua?version=2"
+    r = requests.get(sid_url, verify=verify_ssl, timeout=LOGIN_TIMEOUT)
+    r.raise_for_status()
+    xml = _parse_login_xml(r.content)
+
+    sid = xml.findtext("SID")
+    if sid and sid != INVALID_SID:
+        return sid  # already authenticated (should not happen without cookie)
+
+    blocktime = int(xml.findtext("BlockTime") or 0)
+    if blocktime > 0:
         raise Exception(f"Login blocked for {blocktime} seconds")
 
-    if challenge is None or challenge == "":
-        raise Exception(f"No login challenge. got {r.content} instead")
+    challenge = xml.findtext("Challenge")
+    if not challenge:
+        raise Exception(f"No login challenge received, got: {r.content[:200]!r}")
 
-    # Prepare challenge-response
-    challenge_response = challenge + "-" + hashlib.md5(
-        (challenge + "-" + password).encode("utf-16le")
-    ).hexdigest()
+    if challenge.startswith("2$"):
+        response = calculate_pbkdf2_response(challenge, password)
+        method = "PBKDF2"
+    else:
+        response = calculate_md5_response(challenge, password)
+        method = "MD5"
+    if debug:
+        sys.stderr.write(f"Login challenge type: {method}\n")
 
-    payload = {
-        "username": username,
-        "response": challenge_response
-    }
+    r = requests.post(
+        sid_url,
+        data={"username": username, "response": response},
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        verify=verify_ssl,
+        timeout=LOGIN_TIMEOUT,
+    )
+    r.raise_for_status()
+    xml = _parse_login_xml(r.content)
 
-    r = requests.get(sid_url, params=payload, verify=verify_ssl)
-    xml = ET.fromstring(r.content)
-    sid = xml.find("SID").text
-
-    if sid == "0000000000000000":
-        raise Exception("Authentication failed")
+    sid = xml.findtext("SID")
+    if not sid or sid == INVALID_SID:
+        blocktime = int(xml.findtext("BlockTime") or 0)
+        hint = f" (login blocked for {blocktime} seconds)" if blocktime > 0 else ""
+        raise Exception(f"Authentication failed{hint}")
 
     return sid
+
+
+def logout(base_url, sid, verify_ssl):
+    try:
+        requests.get(
+            f"{base_url}/login_sid.lua",
+            params={"logout": "1", "sid": sid},
+            verify=verify_ssl,
+            timeout=LOGIN_TIMEOUT,
+        )
+    except requests.RequestException:
+        pass  # best effort, the session expires on its own
 
 
 def fetch_device_info(base_url, sid, verify_ssl, debug):
@@ -65,10 +132,11 @@ def fetch_device_info(base_url, sid, verify_ssl, debug):
         f"{base_url}/webservices/homeautoswitch.lua",
         params={"switchcmd": "getdevicelistinfos", "sid": sid},
         verify=verify_ssl,
+        timeout=DATA_TIMEOUT,
     )
+    r.raise_for_status()
     if debug:
-        print("<<<fritzbox_smarthome>>>")
-        print("RAW:", r.text)
+        sys.stderr.write("RAW device list:\n" + r.text + "\n")
 
     devices = []
     root = ET.fromstring(r.content)
@@ -82,19 +150,18 @@ def fetch_device_info(base_url, sid, verify_ssl, debug):
             "identifier": device.get("identifier"),
             "present": device.findtext("present"),
             "name": device.findtext("name"),
+            "txbusy": device.findtext("txbusy"),
             "battery": device.findtext("battery"),
             "batterylow": device.findtext("batterylow"),
-            "data": {}
+            "data": {},
         }
 
+        # every child element with sub elements becomes a dict (hkr, switch,
+        # powermeter, temperature, humidity, alert, button, ...)
         for sub in device:
-            if sub.tag in ("present", "name"):
+            if len(sub) == 0:
                 continue
-            for elem in sub:
-                if sub.tag not in dev["data"]:
-                    dev["data"][sub.tag] = {}
-                dev["data"][sub.tag][elem.tag] = elem.text
-                
+            dev["data"][sub.tag] = {elem.tag: elem.text for elem in sub}
 
         devices.append(dev)
 
@@ -104,20 +171,29 @@ def fetch_device_info(base_url, sid, verify_ssl, debug):
 def main():
     args = parse_args()
     verify_ssl = not args.ignore_ssl
+    if not verify_ssl:
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     base_url = f"{args.protocol}://{args.host}:{args.port}"
 
     try:
         sid = login(base_url, args.username, args.password, verify_ssl, args.debug)
-        device_data = fetch_device_info(base_url, sid, verify_ssl, args.debug)
-
-        print("<<<fritzbox_smarthome:json>>>")
-        print(json.dumps(device_data, indent=None if not args.debug else 2))
-
     except Exception as e:
-        print("<<<fritzbox_smarthome:json>>>")
-        print(json.dumps({"error": str(e)}))
-        sys.exit(1)
+        sys.stderr.write(f"Login to {base_url} failed: {e}\n")
+        return 1
+
+    try:
+        device_data = fetch_device_info(base_url, sid, verify_ssl, args.debug)
+    except Exception as e:
+        sys.stderr.write(f"Fetching device list from {base_url} failed: {e}\n")
+        return 1
+    finally:
+        logout(base_url, sid, verify_ssl)
+
+    # sep(0): keep each line as one column so whitespace in names survives
+    print("<<<fritzbox_smarthome:sep(0)>>>")
+    print(json.dumps(device_data, indent=2 if args.debug else None))
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
